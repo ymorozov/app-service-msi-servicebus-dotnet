@@ -1,38 +1,35 @@
-﻿using Microsoft.Azure.ServiceBus;
-using Microsoft.Azure.ServiceBus.Primitives;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text;
-using System.Threading.Tasks;
+using Amqp;
 using WebAppServiceBus.Models;
 
 namespace WebAppServiceBus
 {
     public static class ReceivedMessageStore
     {
-        private static QueueClient _receiveClient = null;
-        private static List<string> _receivedMessages = new List<string>();
+        private static readonly IReceiverLink _receiverLink = null;
+        private static readonly List<string> _receivedMessages = new List<string>();
 
         public static void Initialize(ServiceBusConfiguration config)
         {
-            if (_receiveClient != null)
+            if (_receiverLink != null)
             {
                 return;
             }
 
-            TokenProvider tokenProvider = TokenProvider.CreateManagedServiceIdentityTokenProvider();
+            Address address = new Address(config.Host, 5671, null, null, "/", "amqps");
+            var connection = new Connection(address);
+            TokenHelper.PutCsbToken(connection, config, $"sb://{config.Host}/{config.Topic}");
+            var session = new Session(connection);
+            var receiver = new ReceiverLink(session, config.Subscription, config.Topic);
+            receiver.Start(1, ProcessMessage);
+        }
 
-            _receiveClient = new QueueClient($"sb://{config.Namespace}.servicebus.windows.net/", config.Queue, tokenProvider, receiveMode: ReceiveMode.ReceiveAndDelete);
-            _receiveClient.RegisterMessageHandler(
-                (message, cancellationToken) =>
-                {
-                    _receivedMessages.Add($"MessageId:{message.MessageId}, Seq#:{message.SystemProperties.SequenceNumber}, data:{Encoding.UTF8.GetString(message.Body)}");
-                    return Task.CompletedTask;
-                },
-                (exceptionEvent) =>
-                {
-                    _receivedMessages.Add($"Exception: \"{exceptionEvent.Exception.Message}\" {exceptionEvent.ExceptionReceivedContext.EntityPath}");
-                    return Task.CompletedTask;
-                });
+        private static void ProcessMessage(IReceiverLink receiver, Message message)
+        {
+            var msg = Encoding.UTF8.GetString((byte[])message.Body);
+            _receivedMessages.Add(msg);
+            receiver.Accept(message);
         }
 
         public static List<string> GetReceivedMessages()

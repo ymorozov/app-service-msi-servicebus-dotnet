@@ -1,12 +1,11 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.Azure.ServiceBus;
-using Microsoft.Azure.ServiceBus.Primitives;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.Threading.Tasks;
+using Amqp;
 using WebAppServiceBus.Models;
 
 namespace WebAppServiceBus.Controllers
@@ -59,10 +58,12 @@ namespace WebAppServiceBus.Controllers
                 return RedirectToAction("Index");
             }
 
-            var tokenProvider = TokenProvider.CreateManagedServiceIdentityTokenProvider();
-            QueueClient sendClient = new QueueClient($"sb://{Config.Namespace}.servicebus.windows.net/", Config.Queue, tokenProvider);
-            await sendClient.SendAsync(new Message(Encoding.UTF8.GetBytes(messageInfo.MessageToSend)));
-            await sendClient.CloseAsync();
+            Address address = new Address(Config.Host, 5671, null, null, "/", "amqps");
+            var connection = new Connection(address);
+            TokenHelper.PutCsbToken(connection, Config, $"sb://{Config.Host}/{Config.Topic}");
+            var session = new Session(connection);
+            var sender = new SenderLink(session, Config.Subscription, Config.Topic);
+            sender.Send(new Message(Encoding.UTF8.GetBytes(messageInfo.MessageToSend)));
 
             return RedirectToAction("Index");
         }
